@@ -1,0 +1,12 @@
+[submodule "booking-microservice"]
+	path = booking-microservice
+	url = https://github.com/LeonardoMontesinos/booking-microservice.git
+[submodule "theaters-microservice"]
+	path = theaters-microservice
+	url = https://github.com/Joaquin2705/THEATERS.git
+[submodule "movie-microservice"]
+	path = movie-microservice
+	url = https://github.com/Luciana-y/movie-microservice.git
+[submodule "usuario-microservice"]
+	path = usuario-microservice
+	url = https://github.com/luciajcm/Usuario-microservicio.git

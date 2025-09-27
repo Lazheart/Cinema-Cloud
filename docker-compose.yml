@@ -1,0 +1,63 @@
+services:
+
+  mongo-db:
+    image: mongo:7
+    container_name: mongo-db
+    ports:
+      - "27018:27017"   # host:container
+    volumes:
+      - mongo-data:/data/db
+
+  mysql-db:
+    image: mysql:8
+    container_name: mysql-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: bookingdb
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3307:3306"   # host:container
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  user-microservice:
+    image: lazheart/user-microservice:1.0
+    container_name: user-microservice
+    ports:
+      - "5000:5000"
+    environment:
+      - MONGO_URL=mongodb://mongo-db:27017/usuarios
+    depends_on:
+      - mongo-db
+
+  theaters-microservice:
+    image: lazheart/theaters-microservice:1.0
+    container_name: theaters-microservice
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=sqlite:///./data/theaters.db
+
+  booking-microservice:
+    image: lazheart/booking-microservice:1.0
+    container_name: booking-microservice
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_HOST=mysql-db
+      - DB_USER=user
+      - DB_PASSWORD=password
+      - DB_NAME=bookingdb
+    depends_on:
+      - mysql-db
+
+  movie-microservice:
+    image: lazheart/movie-microservice:1.0
+    container_name: movie-microservice
+    ports:
+      - "8080:8080"
+
+volumes:
+  mongo-data:
+  mysql-data:
