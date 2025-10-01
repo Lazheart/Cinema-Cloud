@@ -9,10 +9,10 @@
 
 2. En cada **EC2-API**:
 
-   * Copiar `.env` y poner los valores correctos (IP privada del EC2-DB, usuario y password).
+   * Copiar `.env` y poner los valores correctos (IP elastica del EC2-DB, usuario y password).
    * Luego ejecutar:
 
      ```bash
-     docker compose --env-file .env -f docker-compose.api.yml up -d
+     docker compose -f docker-compose.api.yml up -d
      ```
 
