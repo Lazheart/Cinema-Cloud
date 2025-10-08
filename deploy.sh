@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+# Colores
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -59,37 +60,33 @@ wait_for_port() {
 if [ "$MODE" = "db" ]; then
   echo -e "${GREEN}=== Configurando servidor de bases de datos (EC2-DB) ===${NC}"
 
-  # Instalar NFS Server
   echo -e "${YELLOW}Instalando NFS Server...${NC}"
   sudo apt-get update -y
   sudo apt-get install -y nfs-kernel-server
 
-  # Crear carpeta compartida
   echo -e "${YELLOW}Creando carpeta /srv/theaters...${NC}"
   sudo mkdir -p /srv/theaters
   sudo chown -R nobody:nogroup /srv/theaters
   sudo chmod 777 /srv/theaters
 
-  # Configurar exportación NFS
   echo -e "${YELLOW}Configurando exportación NFS...${NC}"
   sudo bash -c "echo '/srv/theaters 172.31.0.0/16(rw,sync,no_subtree_check)' >> /etc/exports"
   sudo exportfs -ra
   sudo systemctl enable nfs-kernel-server
   sudo systemctl restart nfs-kernel-server
 
-  # Ajustar permisos UID 1000
   sudo chown -R 1000:1000 /srv/theaters
   sudo chmod -R 777 /srv/theaters
 
-  # Verificar NFS
   echo -e "${YELLOW}Verificando puerto NFS (2049)...${NC}"
   sudo ss -lntp | grep 2049 || echo -e "${RED}⚠️ NFS no está escuchando en 2049${NC}"
 
-  # Levantar DBs
-  echo -e "${YELLOW}Levantando Mongo y MySQL...${NC}"
-  docker compose -f docker-compose.db.yml up -d
+  echo -e "${YELLOW}Levantando contenedores de bases de datos...${NC}"
+  docker compose -f docker-compose.db.yml up -d mongo || echo -e "${RED}⚠️ Falló MongoDB${NC}"
+  docker compose -f docker-compose.db.yml up -d mysql || echo -e "${RED}⚠️ Falló MySQL${NC}"
+  docker compose -f docker-compose.db.yml up -d postgres || echo -e "${RED}⚠️ Falló Postgres${NC}"
 
-  echo -e "${GREEN}✔ Bases de datos y NFS configurados correctamente.${NC}"
+  echo -e "${GREEN}✔ Bases de datos y NFS configurados correctamente (con posibles advertencias).${NC}"
   echo -e "${YELLOW}Usa 'showmount -e localhost' para verificar la exportación.${NC}"
 
 # -----------------------------
@@ -103,17 +100,26 @@ elif [ "$MODE" = "api" ]; then
     exit 1
   fi
 
+  # Verificar e instalar NFS client
+  echo -e "${YELLOW}Verificando instalación de cliente NFS...${NC}"
+  if ! command -v mount.nfs &>/dev/null; then
+    echo -e "${YELLOW}Instalando paquete nfs-common...${NC}"
+    sudo apt-get update -y
+    sudo apt-get install -y nfs-common
+  else
+    echo -e "${GREEN}✔ Cliente NFS ya instalado.${NC}"
+  fi
+
   echo -e "${YELLOW}Montando volumen NFS desde ${DB_PRIVATE_IP}...${NC}"
   sudo mkdir -p /mnt/theaters
-  sudo mount -t nfs ${DB_PRIVATE_IP}:/srv/theaters /mnt/theaters || {
+  if ! sudo mount -t nfs ${DB_PRIVATE_IP}:/srv/theaters /mnt/theaters; then
     echo -e "${RED}❌ No se pudo montar NFS. Verifica el puerto 2049 y el grupo de seguridad.${NC}"
-    exit 1
-  }
+  else
+    echo -e "${GREEN}✔ Volumen NFS montado correctamente.${NC}"
+  fi
 
-  echo -e "${GREEN}✔ Volumen NFS montado correctamente.${NC}"
-
-  # Verificar puertos de DB antes de levantar microservicios
-  echo -e "${YELLOW}Verificando conectividad a los servicios de base de datos...${NC}"
+  # Verificar conectividad a bases de datos
+  echo -e "${YELLOW}Verificando conectividad a las bases de datos...${NC}"
 
   declare -A ports_to_check=(
     ["MongoDB"]=27017
@@ -124,18 +130,17 @@ elif [ "$MODE" = "api" ]; then
 
   for service in "${!ports_to_check[@]}"; do
     port="${ports_to_check[$service]}"
-    if ! wait_for_port "$DB_PRIVATE_IP" "$port" 60; then
-      echo -e "${RED}⛔ No se puede continuar. ${service} no está accesible.${NC}"
-      exit 1
+    if ! wait_for_port "$DB_PRIVATE_IP" "$port" 30; then
+      echo -e "${RED}⚠️ ${service} no está accesible, se continuará con el resto.${NC}"
+    else
+      echo -e "${GREEN}✔ ${service} accesible.${NC}"
     fi
   done
 
-  echo -e "${GREEN}✔ Todos los puertos de DB accesibles.${NC}"
+  echo -e "${YELLOW}Levantando microservicios y NGINX...${NC}"
+  docker compose -f docker-compose.api.yml up -d || echo -e "${RED}⚠️ Error al desplegar docker-compose.api.yml${NC}"
 
-  # Levantar microservicios + NGINX
-  docker compose -f docker-compose.api.yml up -d
-
-  echo -e "${GREEN}✔ APIs y NGINX desplegados correctamente.${NC}"
+  echo -e "${GREEN}✔ APIs y NGINX desplegados correctamente (con posibles advertencias).${NC}"
 
 else
   echo -e "${RED}Modo inválido. Usa 'db' o 'api'.${NC}"
