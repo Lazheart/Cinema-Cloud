@@ -1,105 +1,133 @@
 # 🎬 Cinema Cloud – Meta Repo
 
-Este repositorio actúa como **meta-repo** que centraliza el despliegue de los microservicios del proyecto **Cinema Cloud**.
+Este repositorio actúa como **meta-repositorio** para el despliegue completo del ecosistema **Cinema Cloud**, que se compone de múltiples **microservicios independientes** (usuarios, películas, reservas y teatros).
 
-Cada microservicio (usuarios, películas, reservas, teatros) se encuentra en su propio repositorio, y desde allí se generan las **imágenes de Docker** que se publican en Docker Hub bajo el espacio de cada desarrollador (`lazheart/*`, `LeoMontesinos/*`, etc.).
-
-Este repo contiene únicamente los **archivos de orquestación** (`docker-compose`) y la configuración de **NGINX** para levantar todo el ecosistema en **instancias EC2** de AWS.
-
----
-
-## 🛠️ Requisitos previos
-
-1. Tener **Docker** y **Docker Compose** instalados en tus instancias EC2.
-2. Contar con al menos **tres instancias EC2**:
-   - **EC2-DB** → donde correrán las bases de datos.
-   - **EC2-API (x2 o más)** → donde correrán los microservicios y NGINX.
-   - (Opcional) **Load Balancer (LB)** → que apunte a las EC2-API.
-3. Configurar correctamente la **IP privada** de tu EC2-DB para que los microservicios puedan conectarse desde las EC2-API.
+Cada microservicio tiene su propio repositorio y genera su imagen Docker publicada en Docker Hub bajo los espacios de cada desarrollador (`lazheart/*`, `luciajcm/*`, `joemir123/*`, etc.).  
+Desde este meta-repo se orquesta **todo el sistema** mediante **Docker Compose**, **NGINX** y **scripts automatizados de despliegue** en instancias **AWS EC2**.
 
 ---
 
-## 📂 Estructura del repositorio
+## 🧱 Estructura del Repositorio
 
 ```
 
 lazheart-cinema-cloud/
-├── README.md
-├── docker-compose.api.yml   # Orquestación de microservicios + NGINX
-├── docker-compose.db.yml    # Orquestación de bases de datos (Mongo + MySQL)
+├── README.md                  # Documentación general
+├── deploy.sh                  # Script automatizado de despliegue
+├── docker-compose.api.yml     # Microservicios + NGINX (EC2-API)
+├── docker-compose.db.yml      # Bases de datos (EC2-DB)
 └── nginx/
-└── nginx.conf           # Configuración del reverse proxy
+└── nginx.conf             # Configuración del reverse proxy (API Gateway)
 
 ````
 
 ---
 
-## 🗄️ Paso 1 – Desplegar bases de datos (EC2-DB)
+## 🛠️ Requisitos Previos
 
-En tu instancia **EC2-DB**, levanta MongoDB y MySQL:
+1. **Docker** y **Docker Compose** instalados en todas tus instancias EC2.
+2. Contar con al menos **tres instancias EC2**:
+   - 🗄️ **EC2-DB** → almacena MongoDB y MySQL.
+   - ⚙️ **EC2-API (x2 o más)** → ejecutan los microservicios y NGINX.
+   - 🌐 *(Opcional)* **Load Balancer (LB)** → distribuye tráfico al grupo de EC2-API.
+3. Configurar las **IP privadas** y los **grupos de seguridad** correctamente:
+   - EC2-DB debe permitir acceso a los puertos `27017 (Mongo)`, `3306 (MySQL)` y `2049 (NFS)` solo desde las EC2-API.
+   - EC2-API debe permitir el puerto `8000` (para el tráfico del Load Balancer).
+
+---
+
+## ⚙️ Paso 1 – Desplegar Bases de Datos (EC2-DB)
+
+Conéctate a tu instancia **EC2-DB** y ejecuta:
 
 ```bash
-docker compose -f docker-compose.db.yml up -d
+chmod +x deploy.sh
+./deploy.sh db
 ````
 
-Esto levantará:
+Este modo realiza automáticamente lo siguiente:
 
-* **MongoDB (puerto 27017)** → usado por el **User Microservice**.
-* **MySQL (puerto 3306)** → usado por el **Booking Microservice**.
+* Instala y configura **NFS Server** para compartir datos de los teatros.
+* Levanta los contenedores de **MongoDB** y **MySQL** usando `docker-compose.db.yml`.
+* Crea el directorio `/srv/theaters` y lo comparte vía NFS con la red interna.
 
-Los datos se almacenan en volúmenes Docker (`mongo-data`, `mysql-data`) para que persistan tras reinicios.
+Puertos expuestos:
+
+| Servicio | Puerto | Uso                         |
+| -------- | ------ | --------------------------- |
+| MongoDB  | 27017  | User y Booking Microservice |
+| MySQL    | 3306   | Booking Microservice        |
+| NFS      | 2049   | Theaters Microservice       |
+
+Verifica que el NFS esté activo:
+
+```bash
+showmount -e localhost
+```
 
 ---
 
-## ⚙️ Paso 2 – Configurar variables de entorno (EC2-API)
+## ⚙️ Paso 2 – Configurar Variables de Entorno (EC2-API)
 
-En cada **EC2-API**, copia un archivo `.env` con las credenciales y la IP **privada o elástica** de tu instancia **EC2-DB**:
+En cada instancia **EC2-API**, crea un archivo `.env` con la IP privada de tu EC2-DB y credenciales:
 
 ```env
+# Dirección privada de la EC2-DB
+DB_PRIVATE_IP=172.31.x.x
+
 # Mongo
-MONGO_HOST=<IP_PRIVADA_EC2_DB>
+MONGO_HOST=${DB_PRIVATE_IP}
 
 # MySQL
-DB_HOST=<IP_PRIVADA_EC2_DB>
+MYSQL_HOST=${DB_PRIVATE_IP}
 DB_USER=user
 DB_PASSWORD=password
 DB_NAME=bookingdb
-```
 
-> ⚠️ **Importante:** Asegúrate de abrir los puertos **27017 (Mongo)** y **3306 (MySQL)** en el Security Group de la EC2-DB, permitiendo tráfico solo desde tus EC2-API.
+# Postgres (si aplica para Movie Microservice)
+POSTGRES_HOST=${DB_PRIVATE_IP}
+```
 
 ---
 
-## 🚀 Paso 3 – Desplegar microservicios + NGINX (EC2-API)
+## ⚙️ Paso 3 – Desplegar Microservicios + NGINX (EC2-API)
 
-En cada instancia **EC2-API**, ejecuta:
+En cada **EC2-API**, ejecuta:
 
 ```bash
-docker compose -f docker-compose.api.yml up -d
+chmod +x deploy.sh
+./deploy.sh api
 ```
 
-Esto levantará:
+Este modo realiza automáticamente lo siguiente:
 
-* **User Microservice** → `http://<EC2_PRIVATE_IP>:5000/`
-* **Theaters Microservice** → `http://<EC2_PRIVATE_IP>:8001/`
-* **Booking Microservice** → `http://<EC2_PRIVATE_IP>:3000/`
-* **Movie Microservice** → `http://<EC2_PRIVATE_IP>:8080/`
-* **NGINX API Gateway (puerto 80 interno / 8000 externo)** → Reverse proxy interno
+1. **Monta el volumen NFS** desde la EC2-DB en `/mnt/theaters`.
+2. **Verifica conectividad** con los puertos `27017`, `3306`, `2049`, y `15432` (si aplica).
+3. **Levanta los microservicios y NGINX** usando `docker-compose.api.yml`.
+
+Servicios desplegados:
+
+| Servicio              | Puerto Interno | Puerto Externo | Imagen Docker                       |
+| --------------------- | -------------- | -------------- | ----------------------------------- |
+| User Microservice     | 5000           | 5000           | `luciajcm/user-microservice`        |
+| Theaters Microservice | 8001           | 8001           | `joemir123/theaters-api`            |
+| Booking Microservice  | 3000           | 3000           | `lazheart/booking-microservice:1.0` |
+| Movie Microservice    | 8080           | 8080           | `lucianayc/movie-microservice`      |
+| NGINX API Gateway     | 80             | 8000           | `nginx:latest`                      |
 
 ---
 
-## 🌍 Despliegue con Load Balancer (LB)
+## 🌐 Paso 4 – Configurar el Load Balancer (LB)
 
-El **Load Balancer (LB)** actúa como punto único de acceso para el **frontend**.
-Todas las peticiones se envían al DNS fijo del LB, por ejemplo:
+1. Crea un **Load Balancer** en AWS (tipo Application Load Balancer).
+2. Crea un **Target Group** que apunte a tus instancias EC2-API en el **puerto 8000**.
+3. Asigna el **DNS público del LB** como punto de entrada del frontend:
 
 ```
 http://cinema-lb-123456789.us-east-1.elb.amazonaws.com
 ```
 
-El LB distribuye el tráfico entre las EC2-API registradas en su **grupo de destino** (Target Group), cada una escuchando en el **puerto 8000** (mapeado al 80 interno de NGINX).
-
-Flujo de peticiones:
+Flujo del tráfico:
 
 ```
 Frontend → Load Balancer → EC2-API (NGINX) → Microservicios
@@ -107,40 +135,63 @@ Frontend → Load Balancer → EC2-API (NGINX) → Microservicios
 
 Ventajas:
 
-* Alta disponibilidad (si una EC2 falla, el LB redirige el tráfico).
 * Escalabilidad horizontal (puedes agregar más EC2-API).
-* IP fija (DNS del LB) para el frontend.
+* Alta disponibilidad.
+* DNS fijo para el frontend.
 
 ---
 
-## 🌐 API Gateway con NGINX
+## 🧩 Enrutamiento (NGINX API Gateway)
 
-El archivo [`nginx/nginx.conf`](nginx/nginx.conf) define el **reverse proxy** interno que enruta las peticiones entrantes hacia el microservicio correcto:
+El archivo [`nginx/nginx.conf`](nginx/nginx.conf) define las rutas internas:
 
-* `/user/` → User Microservice
-* `/theaters/` → Theaters Microservice
-* `/booking/` → Booking Microservice
-* `/movie/` → Movie Microservice
+| Path         | Servicio              | Contenedor destino           |
+| ------------ | --------------------- | ---------------------------- |
+| `/users/`    | User Microservice     | `users-microservice:5000`    |
+| `/theaters/` | Theaters Microservice | `theaters-microservice:8001` |
+| `/booking/`  | Booking Microservice  | `booking-microservice:3000`  |
+| `/movie/`    | Movie Microservice    | `movie-microservice:8080`    |
 
-De esta forma, el frontend solo necesita conectarse al **DNS del Load Balancer**, y NGINX se encarga del enrutamiento interno.
-
----
-
-## 🔑 Resumen
-
-1. **Levanta las bases de datos** en `EC2-DB`.
-2. **Configura `.env`** en cada `EC2-API` con la IP de `EC2-DB`.
-3. **Despliega las APIs + NGINX** en cada EC2-API.
-4. **Registra tus EC2-API** en el **Load Balancer** (puerto 8000).
-5. El **frontend** apunta únicamente al **DNS público del Load Balancer**.
+De esta manera, el frontend solo necesita conectarse al **DNS del Load Balancer** y NGINX se encarga de enrutar las peticiones.
 
 ---
 
-## 🧠 Tips
+## 🧠 Comandos Útiles
 
-* Si algún contenedor no se levanta, revisa los logs con:
+Ver logs de un servicio:
 
-  ```bash
-  docker compose logs -f <nombre_servicio>
-  ```
-* Si tarda en conectarse a las bases de datos, asegúrate de que los **puertos estén abiertos en el Security Group** o ajusta el script de despliegue (`deploy_db.sh`) para detectar y avisar automáticamente.
+```bash
+docker compose logs -f <nombre_servicio>
+```
+
+Ver contenedores activos:
+
+```bash
+docker ps
+```
+
+Reiniciar un servicio:
+
+```bash
+docker compose restart <nombre_servicio>
+```
+
+Detener todo:
+
+```bash
+docker compose down
+```
+
+---
+
+## 🔑 Resumen Final
+
+| Paso | Instancia | Acción                                            |
+| ---- | --------- | ------------------------------------------------- |
+| 1️⃣  | EC2-DB    | Ejecutar `./deploy.sh db`                         |
+| 2️⃣  | EC2-API   | Crear `.env` con IP privada del DB                |
+| 3️⃣  | EC2-API   | Ejecutar `./deploy.sh api`                        |
+| 4️⃣  | AWS       | Configurar Load Balancer apuntando al puerto 8000 |
+| ✅    | Frontend  | Conectarse al DNS público del LB                  |
+
+---
