@@ -133,7 +133,7 @@ elif [ "$MODE" = "api" ]; then
 
   declare -A ports_to_check=(
     ["MongoDB"]=27017
-    ["MySQL"]=3306
+    ["MySQL"]=3307
     ["Postgres"]=15432
     ["NFS"]=2049
   )
