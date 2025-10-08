@@ -45,7 +45,6 @@ wait_for_port() {
 
     if [ "$elapsed" -ge "$timeout" ]; then
       echo -e "\n${RED}❌ No se pudo conectar a ${host}:${port} tras ${timeout}s.${NC}"
-      echo -e "${YELLOW}→ Verifica el grupo de seguridad o firewall y asegúrate de que el puerto esté abierto.${NC}\n"
       return 1
     fi
 
@@ -53,6 +52,10 @@ wait_for_port() {
     sleep 3
   done
 }
+
+# Variables de estado para el resumen
+declare -A STATUS
+STATUS=()
 
 # -----------------------------
 # 🚀 Modo EC2-DB
@@ -79,12 +82,17 @@ if [ "$MODE" = "db" ]; then
   sudo chmod -R 777 /srv/theaters
 
   echo -e "${YELLOW}Verificando puerto NFS (2049)...${NC}"
-  sudo ss -lntp | grep 2049 || echo -e "${RED}⚠️ NFS no está escuchando en 2049${NC}"
+  if sudo ss -lntp | grep -q 2049; then
+    STATUS["NFS"]="✔"
+  else
+    STATUS["NFS"]="❌"
+    echo -e "${RED}⚠️ NFS no está escuchando en 2049${NC}"
+  fi
 
   echo -e "${YELLOW}Levantando contenedores de bases de datos...${NC}"
-  docker compose -f docker-compose.db.yml up -d mongo || echo -e "${RED}⚠️ Falló MongoDB${NC}"
-  docker compose -f docker-compose.db.yml up -d mysql || echo -e "${RED}⚠️ Falló MySQL${NC}"
-  docker compose -f docker-compose.db.yml up -d postgres || echo -e "${RED}⚠️ Falló Postgres${NC}"
+  docker compose -f docker-compose.db.yml up -d mongo && STATUS["MongoDB"]="✔" || STATUS["MongoDB"]="❌"
+  docker compose -f docker-compose.db.yml up -d mysql && STATUS["MySQL"]="✔" || STATUS["MySQL"]="❌"
+  docker compose -f docker-compose.db.yml up -d postgres && STATUS["Postgres"]="✔" || STATUS["Postgres"]="❌"
 
   echo -e "${GREEN}✔ Bases de datos y NFS configurados correctamente (con posibles advertencias).${NC}"
   echo -e "${YELLOW}Usa 'showmount -e localhost' para verificar la exportación.${NC}"
@@ -112,10 +120,12 @@ elif [ "$MODE" = "api" ]; then
 
   echo -e "${YELLOW}Montando volumen NFS desde ${DB_PRIVATE_IP}...${NC}"
   sudo mkdir -p /mnt/theaters
-  if ! sudo mount -t nfs ${DB_PRIVATE_IP}:/srv/theaters /mnt/theaters; then
-    echo -e "${RED}❌ No se pudo montar NFS. Verifica el puerto 2049 y el grupo de seguridad.${NC}"
-  else
+  if sudo mount -t nfs ${DB_PRIVATE_IP}:/srv/theaters /mnt/theaters; then
+    STATUS["NFS"]="✔"
     echo -e "${GREEN}✔ Volumen NFS montado correctamente.${NC}"
+  else
+    STATUS["NFS"]="❌"
+    echo -e "${RED}❌ No se pudo montar NFS.${NC}"
   fi
 
   # Verificar conectividad a bases de datos
@@ -130,15 +140,19 @@ elif [ "$MODE" = "api" ]; then
 
   for service in "${!ports_to_check[@]}"; do
     port="${ports_to_check[$service]}"
-    if ! wait_for_port "$DB_PRIVATE_IP" "$port" 30; then
-      echo -e "${RED}⚠️ ${service} no está accesible, se continuará con el resto.${NC}"
+    if wait_for_port "$DB_PRIVATE_IP" "$port" 30; then
+      STATUS["$service"]="✔"
     else
-      echo -e "${GREEN}✔ ${service} accesible.${NC}"
+      STATUS["$service"]="❌"
     fi
   done
 
   echo -e "${YELLOW}Levantando microservicios y NGINX...${NC}"
-  docker compose -f docker-compose.api.yml up -d || echo -e "${RED}⚠️ Error al desplegar docker-compose.api.yml${NC}"
+  if docker compose -f docker-compose.api.yml up -d; then
+    STATUS["Microservicios"]="✔"
+  else
+    STATUS["Microservicios"]="❌"
+  fi
 
   echo -e "${GREEN}✔ APIs y NGINX desplegados correctamente (con posibles advertencias).${NC}"
 
@@ -147,4 +161,12 @@ else
   exit 1
 fi
 
-echo -e "${YELLOW}=== Despliegue completado ===${NC}"
+# -----------------------------
+# 📊 Resumen final
+# -----------------------------
+echo -e "\n${YELLOW}=== RESUMEN DEL DESPLIEGUE ===${NC}"
+for key in "${!STATUS[@]}"; do
+  printf "%-15s %b\n" "$key" "${STATUS[$key]}"
+done
+echo -e "${YELLOW}==============================${NC}"
+echo -e "${GREEN}✔ Despliegue completado.${NC}"
