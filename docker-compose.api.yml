@@ -29,13 +29,13 @@ services:
 
   # --- Booking Microservice ---
   booking-microservice:
-    image: lazheart/booking-microservice:1.0
+    image: leom1509/booking-microservice
     container_name: booking-microservice
     restart: always
     ports:
       - "3000:3000"
     environment:
-      MONGO_URI: mongodb://${MONGO_HOST}:27017/bookingdb
+      MONGODB_URI: mongodb://${MONGO_HOST}:27017/bookingdb
     networks:
       - cinema-net
 
@@ -55,23 +55,8 @@ services:
     networks:
       - cinema-net
 
-  # --- Nginx Reverse Proxy ---
-  nginx:
-    image: nginx:latest
-    container_name: api-gateway
+  # --- Analytics Microservice ---
+  analytics-microservice:
+    image: lucianayc/analytics-api
+    container_name: analytics-microservice
     restart: always
-    ports:
-      - "8000:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - users-microservice
-      - theaters-microservice
-      - booking-microservice
-      - movie-microservice
-    networks:
-      - cinema-net
-
-networks:
-  cinema-net:
-    driver: bridge
